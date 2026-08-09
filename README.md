@@ -50,6 +50,12 @@ spectrum.peak_frequency(sample_rate: 8000)  #=> 439.59...
 
 Supported FFT sizes: 32, 64, 128, 256, 512, 1024, 2048, 4096.
 
+**`FFT#forward` overwrites the buffer it is given.** CMSIS-DSP's
+`arm_rfft_fast_f32` uses its input as scratch space, and this gem does not copy
+it — on a board where the largest free block is a few kilobytes, a hidden copy
+is worse than a surprising one. Refill the buffer before reusing it. (The name
+should probably be `forward!`; see the v0.2 notes.)
+
 ## Three things worth knowing
 
 **Anything that loops once per sample belongs in C.** `#argmax` started as a
@@ -57,16 +63,31 @@ Ruby `while` loop and it cost more than the FFT it was scanning — the loop pay
 a method dispatch per element, the FFT pays none. Moving it to C, measured with
 `bench/fft_bench.rb`:
 
-| N | Ruby loop | C | |
-|---|---|---|---|
-| 256 | 0.0046 ms | 0.0001 ms | 30.6× |
-| 512 | 0.0086 ms | 0.0003 ms | 32.4× |
-| 1024 | 0.0163 ms | 0.0005 ms | 32.2× |
-| 2048 | 0.0304 ms | 0.0010 ms | 31.1× |
+| N | Ruby loop | C | | on RP2350 |
+|---|---|---|---|---|
+| 256 | 0.0046 ms | 0.0001 ms | 30.6× | **57.5×** |
+| 512 | 0.0086 ms | 0.0003 ms | 32.4× | **79.6×** |
+| 1024 | 0.0163 ms | 0.0005 ms | 32.2× | — |
+| 2048 | 0.0304 ms | 0.0010 ms | 31.1× | — |
 
-At N=1024 that took the whole pipeline from 0.0211 ms to 0.0053 ms, and put the
-FFT back where you would expect it — as the most expensive stage. Composing the
-stages is still Ruby, and costs about 0.0006 ms of the 0.0053.
+The first three columns are a POSIX build on an M-series Mac; the last is the
+same script on a Pico 2 W. The gap widens on the microcontroller, where
+dispatch overhead is a larger share of everything.
+
+**On RP2350 the typed buffer is not an optimisation, it is the only option.**
+R2P2 leaves about 400 KB of Ruby heap, but fragmentation caps the largest
+single allocation near 6 KB:
+
+| allocation | contiguous bytes | result |
+|---|---|---|
+| `DSP::Buffer.new(1024)` | 4,096 | fits |
+| `Array` of 1024 `Float` | 16,384+ (doubles while growing) | `NoMemoryError` |
+
+`mrb_float` is a double, so a Ruby array of samples wants four times the bytes
+of an f32 buffer before counting per-element overhead and the doubling regrowth.
+1024 samples do not fit in an `Array` on this board. They fit in a `Buffer`.
+`Buffer#set_array` exists for convenience on hosts with room; on the board,
+fill the buffer directly or hand it to a DMA capture.
 
 **Every FFT length you leave enabled costs flash.** `DSP::FFT.new(n)` takes its
 length at run time, so the linker has to keep the twiddle and bit-reversal
