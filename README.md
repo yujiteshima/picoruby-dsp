@@ -63,31 +63,34 @@ Ruby `while` loop and it cost more than the FFT it was scanning — the loop pay
 a method dispatch per element, the FFT pays none. Moving it to C, measured with
 `bench/fft_bench.rb`:
 
-| N | Ruby loop | C | | on RP2350 |
+| N | POSIX Ruby | POSIX C | | RP2350 Ruby | RP2350 C | |
+|---|---|---|---|---|---|---|
+| 256 | 0.0046 ms | 0.0001 ms | 30.6× | 2.514 ms | 0.0308 ms | **81.6×** |
+| 512 | 0.0086 ms | 0.0003 ms | 32.4× | 4.887 ms | 0.0478 ms | **102.2×** |
+| 1024 | 0.0163 ms | 0.0005 ms | 32.2× | 9.646 ms | 0.0675 ms | **142.9×** |
+| 2048 | 0.0304 ms | 0.0010 ms | 31.1× | 19.222 ms | 0.1187 ms | **161.9×** |
+
+POSIX is an M-series Mac; RP2350 is a Pico 2 W running R2P2. The gap widens on
+the microcontroller, and widens further with N because the C call's fixed
+overhead amortises. On the board the Ruby loop costs 4.4–7.1× the FFT it is
+scanning.
+
+**A sample buffer costs 4 bytes per sample here and 16 in a Ruby Array.**
+`mrb_value` under `MRB_NO_BOXING` with `MRB_INT64` is a double plus a type tag,
+padded to 16 bytes. That matters more than it sounds, because R2P2's heap
+fragments as it runs and what you can allocate is bounded by the largest
+contiguous block, not by the free total:
+
+| largest free block | `Buffer` 1024 (4 KB) | `Buffer` 2048 (8 KB) | `Array` 1024 (16 KB) | `Array` 2048 (32 KB) |
 |---|---|---|---|---|
-| 256 | 0.0046 ms | 0.0001 ms | 30.6× | **57.5×** |
-| 512 | 0.0086 ms | 0.0003 ms | 32.4× | **79.6×** |
-| 1024 | 0.0163 ms | 0.0005 ms | 32.2× | — |
-| 2048 | 0.0304 ms | 0.0010 ms | 31.1× | — |
+| 88 KB (fresh boot) | fits | fits | fits | fits |
+| 27 KB (after a benchmark run) | fits | fits | fits | **fails** |
+| 5.8 KB (after a long session) | fits | **fails** | **fails** | **fails** |
 
-The first three columns are a POSIX build on an M-series Mac; the last is the
-same script on a Pico 2 W. The gap widens on the microcontroller, where
-dispatch overhead is a larger share of everything.
-
-**On RP2350 the typed buffer is not an optimisation, it is the only option.**
-R2P2 leaves about 400 KB of Ruby heap, but fragmentation caps the largest
-single allocation near 6 KB:
-
-| allocation | contiguous bytes | result |
-|---|---|---|
-| `DSP::Buffer.new(1024)` | 4,096 | fits |
-| `Array` of 1024 `Float` | 16,384+ (doubles while growing) | `NoMemoryError` |
-
-`mrb_float` is a double, so a Ruby array of samples wants four times the bytes
-of an f32 buffer before counting per-element overhead and the doubling regrowth.
-1024 samples do not fit in an `Array` on this board. They fit in a `Buffer`.
-`Buffer#set_array` exists for convenience on hosts with room; on the board,
-fill the buffer directly or hand it to a DMA capture.
+So an `Array` hits the wall one size earlier than a `Buffer`, and it hits it
+sooner as the heap ages — the same code can work at boot and fail an hour later.
+`Buffer#set_array` is a convenience for hosts with room; on the board, fill the
+buffer directly or hand it to a DMA capture.
 
 **Every FFT length you leave enabled costs flash.** `DSP::FFT.new(n)` takes its
 length at run time, so the linker has to keep the twiddle and bit-reversal
