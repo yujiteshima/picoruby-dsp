@@ -1,0 +1,8 @@
+# CMSIS-DSP is fetched by mrbgem.rake on first build (or pointed at an existing
+# checkout via CMSIS_DSP_PATH). It is not vendored here.
+/lib/
+
+# Build artifacts
+*.o
+*.d
+build/
