@@ -78,10 +78,13 @@ SIZES.each do |n|
   buf = DSP::Buffer.from_array(samples)
   measure("hann!               [C]", results) { buf.hann! }
 
-  measure("FFT#forward         [C]", results) { fft.forward(buf) }
+  measure("FFT#forward!        [C]", results) { fft.forward!(buf) }
 
-  spec = fft.forward(buf)
+  spec = fft.forward!(buf)
   measure("Spectrum#magnitude  [C]", results) { spec.magnitude }
+
+  magbuf = DSP::Buffer.new(n / 2)
+  measure("magnitude_into      [C]", results) { spec.magnitude_into(magbuf) }
 
   mag = spec.magnitude
   ruby_ms = measure("argmax, hand-written Ruby loop", results) { ruby_argmax(mag, 1) }
@@ -90,7 +93,7 @@ SIZES.each do |n|
   measure("peak_frequency   [mixed]", results) { spec.peak_frequency(sample_rate: SAMPLE_RATE) }
 
   full = measure("full pipeline", results) do
-    s = fft.forward(DSP::Buffer.from_array(samples).hann!)
+    s = fft.forward!(DSP::Buffer.from_array(samples).hann!)
     s.peak_frequency(sample_rate: SAMPLE_RATE)
   end
 

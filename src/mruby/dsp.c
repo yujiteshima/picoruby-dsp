@@ -172,19 +172,26 @@ mrb_spectrum_bins(mrb_state *mrb, mrb_value self)
   return mrb_fixnum_value((mrb_int)(spectrum_ptr(mrb, self)->size / 2));
 }
 
+/* Writes into a caller-owned Buffer instead of allocating one: per-call
+ * allocation is what ran the N=2048 continuous measurement out of memory
+ * before the GC could keep up. Ruby-level #magnitude wraps this. */
 static mrb_value
-mrb_spectrum_magnitude(mrb_state *mrb, mrb_value self)
+mrb_spectrum_magnitude_into(mrb_state *mrb, mrb_value self)
 {
   dsp_buffer_t *s = spectrum_ptr(mrb, self);
-  struct RClass *mod = mrb_module_get_id(mrb, MRB_SYM(DSP));
-  struct RClass *cls = mrb_class_get_under_id(mrb, mod, MRB_SYM(Buffer));
-  dsp_buffer_t *ob;
+  mrb_value dst;
+  dsp_buffer_t *out;
 
-  ob = (dsp_buffer_t *)mrb_malloc(mrb, sizeof(dsp_buffer_t));
-  ob->size = s->size / 2;
-  ob->data = (float32_t *)mrb_calloc(mrb, ob->size, sizeof(float32_t));
-  DSP_magnitude(s->data, ob->data, s->size);
-  return mrb_obj_value(mrb_data_object_alloc(mrb, cls, ob, &dsp_buffer_type));
+  mrb_get_args(mrb, "o", &dst);
+  out = (dsp_buffer_t *)mrb_data_get_ptr(mrb, dst, &dsp_buffer_type);
+  if (!out) mrb_raise(mrb, E_TYPE_ERROR, "expected a DSP::Buffer");
+  if (out->size != s->size / 2) {
+    mrb_raisef(mrb, E_ARGUMENT_ERROR,
+               "buffer size %i does not match bin count %i",
+               (mrb_int)out->size, (mrb_int)(s->size / 2));
+  }
+  DSP_magnitude(s->data, out->data, s->size);
+  return dst;
 }
 
 /* ------------------------------------------------------------------ FFT */
@@ -279,14 +286,16 @@ mrb_picoruby_dsp_gem_init(mrb_state *mrb)
   MRB_SET_INSTANCE_TT(class_Spectrum, MRB_TT_CDATA);
   mrb_define_method_id(mrb, class_Spectrum, MRB_SYM(size), mrb_spectrum_size, MRB_ARGS_NONE());
   mrb_define_method_id(mrb, class_Spectrum, MRB_SYM(bins), mrb_spectrum_bins, MRB_ARGS_NONE());
-  mrb_define_method_id(mrb, class_Spectrum, MRB_SYM(magnitude), mrb_spectrum_magnitude, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, class_Spectrum, MRB_SYM(magnitude_into), mrb_spectrum_magnitude_into, MRB_ARGS_REQ(1));
 
   struct RClass *class_FFT =
     mrb_define_class_under_id(mrb, mod_DSP, MRB_SYM(FFT), mrb->object_class);
   MRB_SET_INSTANCE_TT(class_FFT, MRB_TT_CDATA);
   mrb_define_method_id(mrb, class_FFT, MRB_SYM(initialize), mrb_fft_initialize, MRB_ARGS_REQ(1));
   mrb_define_method_id(mrb, class_FFT, MRB_SYM(size), mrb_fft_size, MRB_ARGS_NONE());
-  mrb_define_method_id(mrb, class_FFT, MRB_SYM(forward), mrb_fft_forward, MRB_ARGS_REQ(1));
+  /* forward! -- arm_rfft_fast_f32 uses its input as scratch, and copying
+   * would cost a buffer this platform cannot spare, so the name says so. */
+  mrb_define_method_id(mrb, class_FFT, MRB_SYM_B(forward), mrb_fft_forward, MRB_ARGS_REQ(1));
 }
 
 void

@@ -1,0 +1,31 @@
+module DSP
+  class Buffer
+    def self.from_array: (Array[Float | Integer] ary) -> Buffer
+    def initialize: (Integer size) -> void
+    def size: () -> Integer
+    def []: (Integer index) -> Float
+    def []=: (Integer index, Float | Integer value) -> (Float | Integer)
+    def set_array: (Array[Float | Integer] ary) -> self
+    def to_a: () -> Array[Float]
+    def hann!: () -> self
+    def argmax: (?Integer skip) -> Integer
+    def each: () { (Float) -> void } -> self
+    def max: () -> Float?
+  end
+
+  class FFT
+    def initialize: (Integer size) -> void
+    def size: () -> Integer
+    # Destructive on its argument: the input doubles as CMSIS-DSP scratch.
+    def forward!: (Buffer buf) -> Spectrum
+  end
+
+  class Spectrum
+    def size: () -> Integer
+    def bins: () -> Integer
+    def magnitude: () -> Buffer
+    def magnitude_into: (Buffer out) -> Buffer
+    def peak_frequency: (sample_rate: Float | Integer, ?min_bin: Integer, ?mag: Buffer?) -> Float?
+    def bin_width: (sample_rate: Float | Integer) -> Float
+  end
+end
