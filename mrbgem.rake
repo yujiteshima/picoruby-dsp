@@ -48,6 +48,15 @@ MRuby::Gem::Specification.new('picoruby-dsp') do |spec|
     spec.cc.flags << '-mfloat-abi=softfp'
     spec.cc.include_paths <<
       "#{MRUBY_ROOT}/mrbgems/picoruby-r2p2/lib/pico-sdk/src/rp2_common/cmsis/stub/CMSIS/Core/Include"
+  else
+    # No CMSIS Core headers on this target. CMSIS-DSP's documented escape
+    # hatch for that is __GNUC_PYTHON__ ("the only way to build on a target
+    # not supported by CMSIS Core"): same C math, no intrinsics. macOS never
+    # reaches it (__APPLE_CC__ wins the compiler dispatch first); Linux
+    # hosts and both ESP32 architectures (Xtensa and RISC-V) need it --
+    # measured 9/9 sources compiling on xtensa-esp-elf and riscv32-esp-elf
+    # with it, 0/9 without.
+    spec.cc.defines << '__GNUC_PYTHON__'
   end
 
   # Minimal CMSIS-DSP source set for a single-precision real FFT.

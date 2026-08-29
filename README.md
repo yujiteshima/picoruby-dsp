@@ -33,7 +33,7 @@ buf = DSP::Buffer.new(1024)
 
 1024.times { |i| buf[i] = Math.sin(2 * Math::PI * 440 * i / 8000.0) }
 
-spectrum = fft.forward(buf.hann!)
+spectrum = fft.forward!(buf.hann!)
 spectrum.peak_frequency(sample_rate: 8000)  #=> 439.59...
 ```
 
@@ -44,17 +44,30 @@ spectrum.peak_frequency(sample_rate: 8000)  #=> 439.59...
 | `DSP::Buffer` | `.new(size)`, `#[]`, `#[]=`, `#size`, `#to_a`, `#set_array` | C |
 | | `#hann!`, `#argmax(skip = 0)` | C |
 | | `.from_array`, `#each`, `#max` | Ruby |
-| `DSP::FFT` | `.new(size)`, `#forward(buffer)` | C (CMSIS-DSP) |
-| `DSP::Spectrum` | `#magnitude`, `#size`, `#bins` | C |
-| | `#peak_frequency(sample_rate:)`, `#bin_width` | Ruby |
+| `DSP::FFT` | `.new(size)`, `#forward!(buffer)` | C (CMSIS-DSP) |
+| `DSP::Spectrum` | `#magnitude_into(buffer)`, `#size`, `#bins` | C |
+| | `#magnitude`, `#peak_frequency(sample_rate:, min_bin:, mag:)`, `#bin_width` | Ruby |
 
 Supported FFT sizes: 32, 64, 128, 256, 512, 1024, 2048, 4096.
 
-**`FFT#forward` overwrites the buffer it is given.** CMSIS-DSP's
+**`FFT#forward!` overwrites the buffer it is given.** CMSIS-DSP's
 `arm_rfft_fast_f32` uses its input as scratch space, and this gem does not copy
 it — on a board where the largest free block is a few kilobytes, a hidden copy
-is worse than a surprising one. Refill the buffer before reusing it. (The name
-should probably be `forward!`; see the v0.2 notes.)
+is worse than a bang. Refill the buffer before reusing it.
+
+**Steady-state loops should not allocate.** `#magnitude` returns a fresh
+Buffer per call; ten of those at N=2048 outran the GC on the board and died
+in `NoMemoryError`. `#magnitude_into(buf)` writes into a buffer you keep, and
+`peak_frequency(..., mag: buf)` threads it through the peak search:
+
+```ruby
+mag = DSP::Buffer.new(fft.size / 2)
+loop do
+  refill(buf)                      # e.g. from a sensor
+  f = fft.forward!(buf.hann!).peak_frequency(sample_rate: RATE, mag: mag)
+  GC.start                         # the Spectrum is this pass's only garbage
+end
+```
 
 ## Three things worth knowing
 
